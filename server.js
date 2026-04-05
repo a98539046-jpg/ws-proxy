@@ -15,7 +15,7 @@ const httpServer = http.createServer((req, res) => {
   // CORS заголовки для всех ответов
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if(req.method === 'OPTIONS'){
     res.writeHead(204); res.end(); return;
@@ -31,25 +31,45 @@ const httpServer = http.createServer((req, res) => {
   // REST прокси: GET /api?url=https://open-api.bingx.com/...
   if(req.url.startsWith('/api?url=')){
     const targetUrl = decodeURIComponent(req.url.slice('/api?url='.length));
+
     // Разрешаем только BingX домены
     if(!targetUrl.startsWith('https://open-api.bingx.com') &&
        !targetUrl.startsWith('https://open-api-swap.bingx.com')){
       res.writeHead(403); res.end('Forbidden'); return;
     }
-    console.log(`[REST] → ${targetUrl.slice(0,80)}`);
+
+    console.log(`[REST] → ${targetUrl.slice(0,100)}`);
+
     const proxyReq = https.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NarodnyyTerminal/1.0)',
-        'Accept': 'application/json',
+        // ✅ Заголовки которые принимает BingX
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://bingx.com',
+        'Referer': 'https://bingx.com/',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-site',
       }
     }, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode, {'Content-Type': 'application/json'});
+      console.log(`[REST] ← ${proxyRes.statusCode} ${targetUrl.slice(0,60)}`);
+      res.writeHead(proxyRes.statusCode, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
       proxyRes.pipe(res);
     });
+
     proxyReq.on('error', (e) => {
       console.error('[REST] Ошибка:', e.message);
       res.writeHead(502); res.end(JSON.stringify({error: e.message}));
     });
+
     proxyReq.setTimeout(8000, () => {
       proxyReq.destroy();
       res.writeHead(504); res.end(JSON.stringify({error: 'timeout'}));
@@ -66,27 +86,24 @@ const wss = new WebSocketServer({ server: httpServer });
 console.log(`[Proxy] Запуск на порту ${PORT}...`);
 
 wss.on('connection', (clientWs, req) => {
-  // Определяем к какому BingX WS подключаться
-  // Клиент передаёт тип через query: ?market=spot или ?market=swap
-  const url  = new URL(req.url, `http://localhost`);
+  const url    = new URL(req.url, `http://localhost`);
   const market = url.searchParams.get('market') || 'swap';
 
   const bingxUrl = market === 'spot'
     ? 'wss://open-api-ws.bingx.com/market'
-    : 'wss://open-api-swap.bingx.com/swap';
+    : 'wss://open-api-ws.bingx.com/market';  // ✅ публичный endpoint для обоих
 
-  console.log(`[Proxy] Новое подключение → ${bingxUrl}`);
+  console.log(`[Proxy] Новое подключение → ${bingxUrl} (market=${market})`);
 
-  // Подключаемся к BingX от имени сервера (без CORS ограничений)
   const bingxWs = new WebSocket(bingxUrl, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; NarodnyyTerminal/1.0)',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Origin': 'https://bingx.com',
     },
   });
 
   let alive = true;
 
-  // BingX → Клиент
   bingxWs.on('open', () => {
     console.log(`[Proxy] BingX подключён (${market})`);
   });
@@ -113,7 +130,6 @@ wss.on('connection', (clientWs, req) => {
     alive = false;
   });
 
-  // Клиент → BingX (подписки, ping/pong)
   clientWs.on('message', (data) => {
     if (bingxWs.readyState === WebSocket.OPEN) {
       bingxWs.send(data);
@@ -141,5 +157,3 @@ httpServer.listen(PORT, () => {
   console.log(`[Proxy] ✅ Работает на порту ${PORT}`);
   console.log(`[Proxy] Health: http://localhost:${PORT}`);
 });
-
-
