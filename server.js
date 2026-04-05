@@ -1,22 +1,63 @@
 'use strict';
 // ═══════════════════════════════════════════════════════════════
-//  Народный Терминал — WebSocket Прокси
-//  Пробрасывает WS-соединения от браузера к BingX
-//  Решает проблему CORS для WebSocket
+//  Народный Терминал — WebSocket + REST Прокси
+//  Решает проблему CORS для WS и REST запросов к BingX
 // ═══════════════════════════════════════════════════════════════
 
-const http = require('http');
+const http  = require('http');
+const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = process.env.PORT || 8080;
 
-// HTTP сервер — отвечает на health check от Railway
+// HTTP сервер — health check + REST прокси
 const httpServer = http.createServer((req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'text/plain',
-    'Access-Control-Allow-Origin': '*',
-  });
-  res.end('Народный Терминал WS Proxy — OK');
+  // CORS заголовки для всех ответов
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if(req.method === 'OPTIONS'){
+    res.writeHead(204); res.end(); return;
+  }
+
+  // Health check
+  if(req.url === '/' || req.url === '/health'){
+    res.writeHead(200, {'Content-Type': 'text/plain'});
+    res.end('Народный Терминал WS Proxy — OK');
+    return;
+  }
+
+  // REST прокси: GET /api?url=https://open-api.bingx.com/...
+  if(req.url.startsWith('/api?url=')){
+    const targetUrl = decodeURIComponent(req.url.slice('/api?url='.length));
+    // Разрешаем только BingX домены
+    if(!targetUrl.startsWith('https://open-api.bingx.com') &&
+       !targetUrl.startsWith('https://open-api-swap.bingx.com')){
+      res.writeHead(403); res.end('Forbidden'); return;
+    }
+    console.log(`[REST] → ${targetUrl.slice(0,80)}`);
+    const proxyReq = https.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; NarodnyyTerminal/1.0)',
+        'Accept': 'application/json',
+      }
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, {'Content-Type': 'application/json'});
+      proxyRes.pipe(res);
+    });
+    proxyReq.on('error', (e) => {
+      console.error('[REST] Ошибка:', e.message);
+      res.writeHead(502); res.end(JSON.stringify({error: e.message}));
+    });
+    proxyReq.setTimeout(8000, () => {
+      proxyReq.destroy();
+      res.writeHead(504); res.end(JSON.stringify({error: 'timeout'}));
+    });
+    return;
+  }
+
+  res.writeHead(404); res.end('Not found');
 });
 
 // WS сервер поверх HTTP
@@ -100,3 +141,5 @@ httpServer.listen(PORT, () => {
   console.log(`[Proxy] ✅ Работает на порту ${PORT}`);
   console.log(`[Proxy] Health: http://localhost:${PORT}`);
 });
+
+
