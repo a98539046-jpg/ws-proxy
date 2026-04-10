@@ -3,7 +3,6 @@ const http  = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 const PORT = process.env.PORT || 8080;
-
 const httpServer = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -40,9 +39,7 @@ const httpServer = http.createServer((req, res) => {
   }
   res.writeHead(404); res.end('Not found');
 });
-
 const wss = new WebSocketServer({ server: httpServer });
-
 wss.on('connection', (clientWs, req) => {
   const url = new URL(req.url, 'http://localhost');
   const market = url.searchParams.get('market') || 'swap';
@@ -51,7 +48,13 @@ wss.on('connection', (clientWs, req) => {
     : 'wss://open-api-swap.bingx.com/swap';
   console.log(`[Proxy] → ${bingxUrl}`);
   const bingxWs = new WebSocket(bingxUrl, {
-    headers: { 'User-Agent':'Mozilla/5.0', 'Origin':'https://bingx.com' }
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Origin': 'https://bingx.com',
+      'Host': market === 'spot' ? 'open-api-ws.bingx.com' : 'open-api-swap.bingx.com',
+      'Pragma': 'no-cache',
+      'Cache-Control': 'no-cache',
+    }
   });
   let alive = true;
   bingxWs.on('open', ()=> console.log(`[Proxy] подключён (${market})`));
@@ -70,5 +73,4 @@ wss.on('connection', (clientWs, req) => {
   clientWs.on('close', ()=>{ if(alive&&bingxWs.readyState===1) bingxWs.close(); alive=false; });
   clientWs.on('error', ()=>{ if(alive&&bingxWs.readyState===1) bingxWs.close(); alive=false; });
 });
-
 httpServer.listen(PORT, ()=> console.log(`[Proxy] ✅ порт ${PORT}`));
