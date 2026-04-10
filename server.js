@@ -45,7 +45,7 @@ wss.on('connection', (clientWs, req) => {
   const market = url.searchParams.get('market') || 'swap';
   const bingxUrl = market === 'spot'
     ? 'wss://open-api-ws.bingx.com/market'
-    : 'wss://open-api-swap.bingx.com/swap';
+    : 'wss://open-api-swap.bingx.com/swap-market';  // ✅ исправлено
   console.log(`[Proxy] → ${bingxUrl}`);
   const bingxWs = new WebSocket(bingxUrl, {
     headers: {
